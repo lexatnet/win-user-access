@@ -1,3 +1,5 @@
+setlocal enabledelayedexpansion
+
 @echo off
 
 call :get_cur_date
@@ -49,7 +51,7 @@ set config=%1
 echo analizing %config%
 
 for /f "tokens=*" %%a in (%config%) do (
-	setlocal
+	rem setlocal
 	echo config string: %%a
 	call :read_config_from_string %%a
 	echo allowed-day-of-week: %allowed-day-of-week%
@@ -68,7 +70,7 @@ for /f "tokens=*" %%a in (%config%) do (
 	)
 	
 	if defined allowed-day-of-week (
-		call :check_day_of_week_in_range %cur_day_of_week%  %allowed-day-of-week% %allowed-day-of-week%
+		call :check_day_of_week_in_range %cur_day_of_week% %allowed-day-of-week% %allowed-day-of-week%
 	) else (
 		echo day of week rule skiped
 	)
@@ -86,7 +88,7 @@ for /f "tokens=*" %%a in (%config%) do (
 			call :check_time_in_range %cur_time% %%a %%b
 		)
 	)
-	endlocal
+	rem endlocal
 )
 goto shutdown
 
@@ -149,37 +151,28 @@ if %check_time_hh%%check_time_mm% geq %min_time_hh%%min_time_mm% (
 goto shutdown
 
 :read_config_from_string
-if not "%1"=="" (
+if "%1"=="" exit /b
+call :analyze_param %1 %2
+if not "%1"=="" shift
+if not "%1"=="" shift
+if not "%1"=="" goto read_config_from_string
+exit /b
+
+:analyze_param
 	echo config param: %1
-    if "%1"=="allowed-date" (
-        set %1=%2
-        shift
-    )
-	if "%1"=="allowed-date-range" (
-        set %1=%2
-        shift
-    )
-	if "%1"=="allowed-day-of-week" (
-		echo here %2
-        set %1=%2
-		
-		echo allowed-day-of-week: %allowed-day-of-week%
-        shift
-    )
-	if "%1"=="allowed-day-of-week-range" (
-        set %1=%2
-        shift
-    )
-	if "%1"=="allowed-time-range" (
-        set %1=%2
-        shift
-    )
-    shift
-    goto read_config_from_string
-)
+    if "%1"=="allowed-date" call :setvar %1 %2
+	if "%1"=="allowed-date-range" call :setvar %1 %2
+	if "%1"=="allowed-day-of-week" call :setvar %1 %2
+	if "%1"=="allowed-day-of-week-range" call :setvar %1 %2
+	if "%1"=="allowed-time-range" call :setvar %1 %2
 exit /b
 
 
+:setvar
+	echo set "%1=%2"
+	set "%1=%2"
+	echo allowed-day-of-week: %allowed-day-of-week%
+exit /b
 
 
 @ECHO OFF
