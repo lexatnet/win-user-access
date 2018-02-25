@@ -85,29 +85,29 @@ def is_allowed_duration(rule):
 def is_allowed_date(rule):
 	current_date = datetime.today()
 	date_rules = rule.get('access-date')
-	print('date-rules = ', date_rules)
 	if(date_rules):
-		print('processing-date-rules')
 		for i in range(0,len(date_rules)):
 			date_rule = date_rules[i]
 			if isinstance(date_rule, str):
 				date = datetime.strptime(date_rule, '%Y.%m.%d')
 				if(current_date == date):
-					print('true-rule = ',rule)
 					return True
 			if isinstance(date_rule, dict):
 				start_date_str = date_rule.get('start')
 				stop_date_str = date_rule.get('stop')
-				if (start_date_str):
+				if (start_date_str and stop_date_str) :
 					start_date = datetime.strptime(start_date_str, '%Y.%m.%d')
-					if(current_date <= start_date):
-						print('true-rule = ',rule)
+					stop_date = datetime.strptime(stop_date_str, '%Y.%m.%d')
+					if (current_date <= stop_date) and (current_date >= start_date):
+						return True
+				elif (start_date_str):
+					start_date = datetime.strptime(start_date_str, '%Y.%m.%d')
+					if(current_date >= start_date):
 						return True
 					
-				if (stop_date_str):
+				elif (stop_date_str):
 					stop_date = datetime.strptime(stop_date_str, '%Y.%m.%d')
 					if (current_date <= stop_date):
-						print('true-rule = ',rule)
 						return True
 		return False
 	return True
@@ -115,23 +115,22 @@ def is_allowed_date(rule):
 def is_allowed_day(rule):
 	current_day = datetime.isoweekday(datetime.now())
 	day_rules = rule.get('access-day')
-	print('day-rules = ', day_rules)
 	if(day_rules):
 		for i in range(0,len(day_rules)):
 			day_rule = day_rules[i]
 			if isinstance(day_rule, int):
 				if(current_day == day_rule):
-					print('true-rule = ',rule)
 					return True
 			if isinstance(day_rule, dict):
 				start_day = day_rule.get('start')
 				stop_day = day_rule.get('stop')
-				if (start_day and (current_day >= start_day)):
-					print('true-rule = ',rule)
+				if (start_day and stop_date and (current_day >= start_day) and (current_day <= stop_day)):
+					return True
+
+				elif (start_day and (current_day >= start_day)):
 					return True
 					
-				if (stop_day and (current_day <= stop_day)):
-					print('true-rule = ',rule)
+				elif (stop_day and (current_day <= stop_day)):
 					return True
 		return False
 	return True
@@ -146,17 +145,21 @@ def is_allowed_time(rule):
 			if isinstance(time_rule, dict):
 				start_time_str = time_rule.get('start')
 				stop_time_str = time_rule.get('stop')
-				if (start_time_str):
+				if (start_time_str and stop_time_str):
+					start_time = datetime.strptime(start_time_str, '%H:%M').time()
+					stop_time = datetime.strptime(stop_time_str, '%H:%M').time()
+					if (current_time <= stop_time) and (current_time >= start_time):
+						return True
+					
+				elif (start_time_str):
 					start_time = datetime.strptime(start_time_str, '%H:%M').time()
 					print('start_time = ', start_time)
 					if(current_time >= start_time):
-						print('true-rule = ',rule)
 						return True
 					
-				if (stop_time_str):
+				elif (stop_time_str):
 					stop_time = datetime.strptime(stop_time_str, '%H:%M').time()
 					if (current_time <= stop_time):
-						print('true-rule = ',rule)
 						return True
 		return False
 	return True
