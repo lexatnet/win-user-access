@@ -15,6 +15,7 @@
 			6,
 			7
 		],
+		"access-duration":"3hr",
 		"access-time": [
 			{
 				"start": "18:00",
@@ -32,7 +33,7 @@
 		],
 		"access-time": [
 			{
-				"start": "16:00",
+				"start": "17:00",
 				"stop": "21:00"
 			}
 		]

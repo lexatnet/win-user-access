@@ -5,6 +5,17 @@ import json
 import sqlite3
 import time
 
+import signal
+import sys
+
+def signal_handler(signal, frame):
+        print('You pressed Ctrl+C!')
+        sys.exit(0)
+
+signal.signal(signal.SIGINT, signal_handler)
+
+print('Press Ctrl+C')
+
 rules_db_name = 'rules.json'
 access_log_name = 'access.log'
 file_path = os.path.realpath(__file__)
@@ -15,10 +26,24 @@ c = conn.cursor()
 
 c.execute('create table if not exists AccessLog(dt datetime default current_timestamp, user text, data text)')
 
-c.execute('select * from AccessLog')
-log = c.fetchall()
+import re
+from datetime import timedelta
 
-print(log)
+
+regex = re.compile(r'((?P<hours>\d+?)hr)?((?P<minutes>\d+?)m)?((?P<seconds>\d+?)s)?')
+
+
+def parse_time(time_str):
+    parts = regex.match(time_str)
+    if not parts:
+        return
+    parts = parts.groupdict()
+    time_params = {}
+    for (name, param) in parts.iteritems():
+        if param:
+            time_params[name] = int(param)
+    return timedelta(**time_params)
+
 
 def log_access():
 	user = os.getlogin()
@@ -32,7 +57,7 @@ def shutdown():
 
 def wait():
 	print('sleep')
-	time.sleep(60*5);
+	time.sleep(5);
 
 def analyze(rules):
 	log_access()
@@ -41,10 +66,21 @@ def analyze(rules):
 		rule = rules[i]
 		print('rule = ', rule)
 		if is_allowed_date(rule) and is_allowed_day(rule) and is_allowed_time(rule) :
-			print(rule)
+			print('why we wait:',rule)
 			exit = False
 	if (exit):
 		shutdown()
+
+def is_allowed_duration(rule):
+	date_rules = rule.get('access-duration')
+	
+	conn = sqlite3.connect(access_log_path)
+	c = conn.cursor()
+
+	c.execute('select from AccessLog(dt datetime default current_timestamp, user text, data text)')
+
+	if date_rule :
+		pass
 
 def is_allowed_date(rule):
 	current_date = datetime.today()
@@ -63,8 +99,8 @@ def is_allowed_date(rule):
 				start_date_str = date_rule.get('start')
 				stop_date_str = date_rule.get('stop')
 				if (start_date_str):
-					start_date = datetime.strptime(stop_date_str, '%Y.%m.%d')
-					if(current_date >= start_date):
+					start_date = datetime.strptime(start_date_str, '%Y.%m.%d')
+					if(current_date <= start_date):
 						print('true-rule = ',rule)
 						return True
 					
@@ -111,7 +147,7 @@ def is_allowed_time(rule):
 				start_time_str = time_rule.get('start')
 				stop_time_str = time_rule.get('stop')
 				if (start_time_str):
-					start_time = datetime.strptime(stop_time_str, '%H:%M').time()
+					start_time = datetime.strptime(start_time_str, '%H:%M').time()
 					print('start_time = ', start_time)
 					if(current_time >= start_time):
 						print('true-rule = ',rule)

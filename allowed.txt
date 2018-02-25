@@ -1,3 +1,0 @@
-allowed-day-of-week=1 allowed-time-range=16:00-18:00
-allowed-date=05.01.2018 allowed-time-range=20:00-21:00
-allowed-day-of-week-range=1-5 allowed-time-range=08:00-20:00
