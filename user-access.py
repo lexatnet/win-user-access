@@ -9,6 +9,27 @@ import signal
 import sys
 import re
 from datetime import timedelta
+import win32ts as ts
+import win32gui as gui
+
+
+
+
+
+
+
+
+
+
+wc = gui.WNDCLASS()
+wc.hInstance = hInst = api.GetModuleHandle(None)
+wc.lpszClassName = self.className
+wc.lpfnWndProc = self.WndProc	
+self.classAtom = gui.RegisterClass(wc)
+
+scope = ts.NOTIFY_FOR_ALL_SESSIONS
+
+ts.WTSRegisterSessionNotification(self.hWnd, scope)
 
 
 parser = argparse.ArgumentParser(description='Restrict user acces.')
