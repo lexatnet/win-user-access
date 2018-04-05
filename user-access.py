@@ -17,6 +17,17 @@ import win32security
 import servicemanager
 import socket
 
+import logging
+
+file_path = os.path.realpath(__file__)
+dir_path = os.path.dirname(file_path)
+		
+logging.basicConfig(
+	filename = os.path.join(dir_path, 'service.log'),
+	level = logging.DEBUG, 
+	format = '[access-control-service] %(levelname)-7.7s %(message)s'
+)
+
 
 class AccessControlSvc (win32serviceutil.ServiceFramework):
 	_svc_name_ = "AccessControlService"
@@ -24,13 +35,13 @@ class AccessControlSvc (win32serviceutil.ServiceFramework):
 	
 	def __init__(self, args):
 		try:
-			self.userList = []
-			self.log('service init args = {}'.format(args))
+			self.parseArgs(args)
+			self.log('start service initializing')
+			self.initRegisteredUsers()
 			self.regex = re.compile(r'((?P<hours>\d+?)hr)?((?P<minutes>\d+?)m)?((?P<seconds>\d+?)s)?')
 			
-			self.parseArgs()
 			self.initDB()
-			log('arguments = {}'.format(self.args))
+			self.log('service init args = {}'.format(args))
 
 			win32serviceutil.ServiceFramework.__init__(self, args)
 			self.stop_event = win32event.CreateEvent(None, 0, 0, None)
@@ -38,17 +49,24 @@ class AccessControlSvc (win32serviceutil.ServiceFramework):
 			self.stop_requested = False
 			servicemanager.RegisterServiceCtrlHandler(args[0], self.serviceCtrl, True)
 		except Exception as err:
-			logging.error("error: {}".format(err))
+			self.log(err, 'exception')
 			self.SvcStop()
 
-	def parseArgs(self)
+	def parseArgs(self, args):
+		argsList = list(args)
+		argsList.remove(self._svc_name_)
 		parser = argparse.ArgumentParser(description='Restrict user acces.')
-		parser.add_argument('--user', '-u', action='append', type=str, dest='users', default='user', help='user to analyze access')
-		parser.add_argument('--database', '-db', type=str, dest='database', default='access.log', help='database file name')
-		parser.add_argument('--rules', '-r', type=str, dest='rules', default='rules.json', help='file name with rules')
+		parser.add_argument('--user', '-u', action='append', dest='users', default=[], help='user to analyze access')
+		parser.add_argument('--registerUser', '-ru', action='append', dest='registeredUsers', default=[], help='user to init registeredUsers')
+		parser.add_argument('--database', '-db', dest='database', default='access.log', help='database file name')
+		parser.add_argument('--rules', '-r', dest='rules', default='rules.json', help='file name with rules')
+		parser.add_argument('--shutdownDelay', '-sd', dest='shutdownDelay', default='60', help='shutdown delay in seconds')
 		parser.add_argument('--sleep', '-s', type=int, dest='sleep', default=60*5, help='sleep seconds between access checks')
 		parser.add_argument('--debug', '-d', dest='debug', action='store_true', help='run in debug mode')
-		self.args = parser.parse_args()	
+		self.args = parser.parse_args(argsList)
+		self.argsParsed = True
+		self.log('arguments = {}'.format(vars(self.args)))
+		
 	
 	def parse_time(self, time_str):
 		parts = self.regex.match(time_str)
@@ -64,39 +82,54 @@ class AccessControlSvc (win32serviceutil.ServiceFramework):
 
 	
 	def log(self, message, status='info'):
-		if(self.args.debug):
-			print(message)
-		cursor = self.conn.cursor()
-		cursor.execute('insert into Log (status, user, data) values (?, ?, ?)', (status, user, message))
-		self.conn.commit()
+		if hasattr(self, 'argsParsed') and self.argsParsed and hasattr(self, 'args') and self.args.debug :
+			if(status == 'info'):
+				logging.info(message)
+			elif(status == 'error'):
+				logging.error(message)
+			elif(status == 'exception'):
+				logging.exception(message)
+			elif(status == 'warning'):
+				logging.warning(message)
+			else:
+				logging.error(message)
+		try:
+			conn = self.getDBConnection()
+			cursor = conn.cursor()
+			cursor.execute('insert into Log (status, data) values (?, ?)', (status, message))
+			conn.commit()
+		except Exception as err:
+			logging.exception(err)
 
 	def shutdown(self):
 		self.log('shuting down')
-		subprocess.run(['shutdown', '-l', '-f'])
+		subprocess.run(['shutdown', '-f', '-s', '-t', self.args.shutdownDelay])
 		#self.SvcStop()
 		
 	def wait(self):
 		sleep = self.args.sleep
 		self.log('sleep {} seconds'.format(sleep))
-		for sec in range(0,sleep)
+		for sec in range(0,sleep):
 			if (self.stop_requested):
 				break
 			time.sleep(1);
 	
 	def getAccesLogPath(self):
-		file_path = os.path.realpath(__file__)
-		dir_path = os.path.dirname(file_path)
-		return os.path.join(dir_path, self.args.access_log_name)
+		return os.path.join(dir_path, self.args.database)
+	
+	
+	def getDBConnection(self):
+		if not hasattr(self, 'argsParsed'): raise Exception('args not parsed')
+		access_log_path = self.getAccesLogPath()
+		conn = sqlite3.connect(access_log_path)
+		return conn
 	
 	def initDB(self):
-		access_log_path = self.getAccesLogPath()
-		self.conn = sqlite3.connect(access_log_path)
-		
-		cursor = self.conn.cursor()
+		conn = self.getDBConnection()
+		cursor = conn.cursor()
+		self.log('initialize DB structure')
 		cursor.execute('create table if not exists AccessLog(dt datetime default current_timestamp, user text, data text)')
-		cursor.execute('create table if not exists Log(dt datetime default current_timestamp, status text, user text, data text)')
-
-	
+		cursor.execute('create table if not exists Log(dt datetime default current_timestamp, status text, data text)')
 	
 	def serviceCtrl(self, control, controlType, controlData):
 		try:
@@ -114,26 +147,25 @@ class AccessControlSvc (win32serviceutil.ServiceFramework):
 				self.log('serviceCtrl control = {}, userInfo = {}'.format('SERVICE_CONTROL_SESSIONCHANGE', userInfo))
 				types = {
 					'WTS_CONSOLE_CONNECT': 0x1,# The session identified by lParam was connected to the console terminal or RemoteFX session.
-					'WTS_CONSOLE_DISCONNECT': 0x2 # The session identified by lParam was disconnected from the console terminal or RemoteFX session.
-					'WTS_REMOTE_CONNECT': 0x3 # The session identified by lParam was connected to the remote terminal.
-					'WTS_REMOTE_DISCONNECT': 0x4 # The session identified by lParam was disconnected from the remote terminal.
-					'WTS_SESSION_LOGON': 0x5 # A user has logged on to the session identified by lParam.
-					'WTS_SESSION_LOGOFF': 0x6 # A user has logged off the session identified by lParam.
-					'WTS_SESSION_LOCK': 0x7 # The session identified by lParam has been locked.
-					'WTS_SESSION_UNLOCK': 0x8 # The session identified by lParam has been unlocked.
-					'WTS_SESSION_REMOTE_CONTROL': 0x9 # The session identified by lParam has changed its remote controlled status. To determine the status, call GetSystemMetrics and check the SM_REMOTECONTROL metric.
-					'WTS_SESSION_CREATE': 0xA # Reserved for future use.
+					'WTS_CONSOLE_DISCONNECT': 0x2, # The session identified by lParam was disconnected from the console terminal or RemoteFX session.
+					'WTS_REMOTE_CONNECT': 0x3, # The session identified by lParam was connected to the remote terminal.
+					'WTS_REMOTE_DISCONNECT': 0x4, # The session identified by lParam was disconnected from the remote terminal.
+					'WTS_SESSION_LOGON': 0x5, # A user has logged on to the session identified by lParam.
+					'WTS_SESSION_LOGOFF': 0x6, # A user has logged off the session identified by lParam.
+					'WTS_SESSION_LOCK': 0x7, # The session identified by lParam has been locked.
+					'WTS_SESSION_UNLOCK': 0x8, # The session identified by lParam has been unlocked.
+					'WTS_SESSION_REMOTE_CONTROL': 0x9, # The session identified by lParam has changed its remote controlled status. To determine the status, call GetSystemMetrics and check the SM_REMOTECONTROL metric.
+					'WTS_SESSION_CREATE': 0xA, # Reserved for future use.
 					'WTS_SESSION_TERMINATE': 0xB # Reserved for future use.
 				}
-				if(controlType == types.WTS_SESSION_LOGON):
-					self.startCheckingForUser(userName)
-				elif(controlType == types.WTS_SESSION_LOGOFF):
-					self.stopCheckingForUser(userName)
-				elif(controlType == types.WTS_SESSION_LOCK):
-					self.stopCheckingForUser(userName)
-				elif(controlType == types.WTS_SESSION_UNLOCK):
-					self.startCheckingForUser(userName)
-					
+				if(controlType == types['WTS_SESSION_LOGON']):
+					self.registerUser(userName)
+				elif(controlType == types['WTS_SESSION_LOGOFF']):
+					self.unregisterUser(userName)
+				elif(controlType == types['WTS_SESSION_LOCK']):
+					self.unregisterUser(userName)
+				elif(controlType == types['WTS_SESSION_UNLOCK']):
+					self.registerUser(userName)
 					
 			elif(control == win32service.SERVICE_CONTROL_PRESHUTDOWN):
 				self.log('serviceCtrl control = {}'.format('SERVICE_CONTROL_PRESHUTDOWN'))
@@ -162,15 +194,22 @@ class AccessControlSvc (win32serviceutil.ServiceFramework):
 			elif(control == win32service.SERVICE_CONTROL_POWEREVENT):
 				self.log('serviceCtrl control = {}'.format('SERVICE_CONTROL_POWEREVENT'))
 		except Exception as err:
-			logging.error(err)
+			self.log(err, 'exception')
 			self.SvcStop()
 
-	def startCheckingForUser(self, userName):
-		self.userList.append(userName)
+	def initRegisteredUsers(self):
+		self.registeredUsers = []
+		for userName in self.args.registeredUsers:
+			self.registerUser(userName)
 	
-	def stopCheckingForUser(self, userName):
-		self.userList.remove(userName)
+	def registerUser(self, userName):
+			self.log('start checking for user = {}'.format(userName))
+			self.registeredUsers.append(userName)
 	
+	def unregisterUser(self, userName):
+		if(userName in self.registeredUsers):
+			self.log('stop checking for user = {}'.format(userName))
+			self.registeredUsers.remove(userName)
 
 	def SvcStop(self):
 		self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
@@ -201,45 +240,83 @@ class AccessControlSvc (win32serviceutil.ServiceFramework):
 			rc |= win32service.SERVICE_ACCEPT_SESSIONCHANGE
 			return rc
 		except Exception as err:
-			logging.error(err)
+			self.log(err, 'exception')
 	
 	def main(self):
-		self.log(' ** Hello PyWin32 World ** ')
-		# Simulate a main loop
-		while(True):
-			if self.stop_requested:
-				self.log('A stop signal was received: Breaking main loop ...')
-				break
-			rules = get_access_rules()
-			for userName in self.userList:
-				self.log_access(userName)
-				if(userName in self.args.users):
-					self.check_access(userName, rules)
-			self.wait()
-		self.log('service finished.')
+		try:
+			self.log(' ** Access Control Service ** ')
+			# Simulate a main loop
+			while(True):
+				if self.stop_requested:
+					self.log('A stop signal was received: Breaking main loop ...')
+					break
+				rules = self.get_access_rules()
+				self.log('process users access')
+				for userName in self.args.users:
+					self.log_access(userName)
+					if(userName in self.registeredUsers):
+						self.check_access(userName, rules)
+					else:
+						self.log('skip user = {} checking'.format(userName))
+				self.log('process users access finished')
+				self.wait()
+			self.log('service finished.')
+		except Exception as err:
+			self.log(err, 'exception')
 		return
 		
 	def log_access(self, userName):
-		cursor = self.conn.cursor()
+		conn = self.getDBConnection()
+		cursor = conn.cursor()
 		cursor.execute('insert into AccessLog (user, data) values (?, ?)', (userName, 'access'))
-		self.conn.commit()
+		conn.commit()
 
-	def get_access_time(self, rule):
-		access_log = self.get_access_log_for_rule(rule)
+	def get_access_duration(self, user, rule):
+		access_log = self.get_access_log_for_rule(user, rule)
 		access_time = timedelta()
 		prev_time = False
 		while len(access_log) > 0: 
 			rec = access_log.pop()
-			rec_date = datetime.strptime(rec[0], '%Y-%m-%d %H:%M:%S')
+			rec_time = datetime.strptime(rec[0], '%Y-%m-%d %H:%M:%S')
 			if (prev_time):
-				if((prev_time - rec_date) < timedelta(seconds = sleep*2)):
-					access_time += (prev_time - rec_date)
-			prev_time = rec_date
+				delta = prev_time - rec_time
+				if(delta < timedelta(seconds = sleep*2)):
+					access_time += delta
+			prev_time = rec_time
 		return access_time
+	
+	def get_session_duration(self, user, rule):
+		access_log = self.get_access_log_for_rule(user, rule)
+		session_duration = timedelta()
+		prev_time = datetime.now()
+		while len(access_log) > 0: 
+			rec = access_log.pop()
+			rec_time = datetime.strptime(rec[0], '%Y-%m-%d %H:%M:%S')
+			if (prev_time):
+				delta = prev_time - rec_time
+				if(delta < timedelta(seconds = sleep*2)):
+					session_duration += delta
+				else:
+					break
+			prev_time = rec_time
+		return session_duration
+	
+	def get_pause_duration(self, user, rule)
+		access_log = self.get_access_log_for_rule(user, rule)
+		pause_duration = timedelta()
+		current_time = datetime.now()
+		if len(access_log) > 0: 
+			rec = access_log.pop()
+			rec_time = datetime.strptime(rec[0], '%Y-%m-%d %H:%M:%S')
+			delta = current_time - rec_time
+			if(delta > timedelta(seconds = sleep*2)):
+				pause_duration += delta
+		return pause_duration
 
-	def get_access_log_for_rule(self, rule):
+	def get_access_log_for_rule(self, user, rule):
 		date_rules = rule.get('access-date')
 		conditions = []
+		conditions.append('(user = "{}")'.format(user))
 		for date_rule in date_rules:
 			if isinstance(date_rule, str):
 				date = datetime.strptime(date_rule, '%Y.%m.%d')
@@ -296,22 +373,51 @@ class AccessControlSvc (win32serviceutil.ServiceFramework):
 					conditions.append('({})'.format(' and '.join(subconditions)))
 		
 		query = 'select * from AccessLog where (user = "{}") and ({}) order by dt asc'.format(user, ' or '.join(conditions))
-		cursor = self.conn.cursor()
+		conn = self.getDBConnection()
+		cursor = conn.cursor()
 		cursor.execute(query)
 		return cursor.fetchall()
 
-	def is_allowed_duration(self, rule):
-		log('check access duration')
-		duration_rule_str = rule.get('access-duration')
-		if (duration_rule_str) :
-			duration_rule = self.parse_time(duration_rule_str)
-			access_time = self.get_access_time(rule)
-			self.log('access time = {}'.format(access_time))
-			self.log('duration rule = {}'.format(duration_rule))
-			if access_time < duration_rule :
-				self.log('duration rule access success')
+	def is_allowed_session_duration(self, user, rule):
+		self.log('check access session duration')
+		session_duration_rule_str = rule.get('session-duration')
+		if (session_duration_rule_str) :
+			session_duration_rule = self.parse_time(session_duration_rule_str)
+			session_duration = self.get_session_duration(user, rule)
+			self.log('session duration = {}'.format(session_duration))
+			self.log('duration rule = {}'.format(session_duration_rule))
+			if session_duration < session_duration_rule :
+				self.log('session duration rule access success')
 				return True
-		self.log('duration rule access denied')
+		self.log('session duration rule access denied')
+		return False
+	
+	def is_allowed_access_duration(self, user, rule):
+		self.log('check access duration')
+		access_duration_rule_str = rule.get('access-duration')
+		if (access_duration_rule_str) :
+			access_duration_rule = self.parse_time(access_duration_rule_str)
+			access_duration = self.get_access_duration(user, rule)
+			self.log('access duration = {}'.format(access_duration))
+			self.log('access duration rule = {}'.format(access_duration_rule))
+			if access_duration < access_duration_rule :
+				self.log('access duration rule access success')
+				return True
+		self.log('access duration rule access denied')
+		return False
+		
+	def is_allowed_pause_duration(self, user, rule):
+		self.log('check pause duration')
+		pause_duration_rule_str = rule.get('pause-duration')
+		if (pause_duration_rule_str) :
+			pause_duration_rule = self.parse_time(pause_duration_rule_str)
+			pause_duration = self.get_pause_duration(user, rule)
+			self.log('pause duration = {}'.format(access_duration))
+			self.log('pause duration rule = {}'.format(pause_duration_rule))
+			if pause_duration > pause_duration_rule :
+				self.log('pause duration rule access success')
+				return True
+		self.log('pause duration rule access denied')
 		return False
 
 	def is_allowed_date(self, rule):
@@ -341,7 +447,7 @@ class AccessControlSvc (win32serviceutil.ServiceFramework):
 						start_date = datetime.strptime(start_date_str, '%Y.%m.%d')
 						self.log('start date {}'.format(start_date))
 						if(current_date >= start_date):
-							log('date rule access success')
+							self.log('date rule access success')
 							return True
 						
 					elif (not start_date_str and stop_date_str):
@@ -360,10 +466,12 @@ class AccessControlSvc (win32serviceutil.ServiceFramework):
 		for rule in rules:
 			self.log('check rule = {}'.format(rule))
 			if (
-				self.is_allowed_date(rule) 
+				self.is_allowed_user(userName,rule)
+				and self.is_allowed_date(rule) 
 				and self.is_allowed_day(rule) 
 				and self.is_allowed_time(rule) 
-				and self.is_allowed_duration(rule)
+				and self.is_allowed_access_duration(userName, rule)
+				and self.is_allowed_session_duration(userName, rule)
 				) :
 				self.log('all parts access rules success')
 				exit = False
@@ -374,6 +482,15 @@ class AccessControlSvc (win32serviceutil.ServiceFramework):
 			self.log('no rules to grant access')
 			self.shutdown()
 
+	def is_allowed_user(self, user, rule):
+		self.log('check user is allowed')
+		rule_users = rule.get('users')
+		if(user in rule_users):
+			self.log('user rule access success')
+			return True
+		self.log('user rule access denied')
+		return False
+			
 	def is_allowed_day(self, rule):
 		self.log('check access day')
 		current_day = datetime.isoweekday(datetime.now())
@@ -445,27 +562,19 @@ class AccessControlSvc (win32serviceutil.ServiceFramework):
 		return True
 
 	def get_access_rules(self):
-		rules_db_path = os.path.join(dir_path, self.args.rules_db_name)
+		self.log('getting access rules')
+		rules_db_path = os.path.join(dir_path, self.args.rules)
 		rules_file = open(rules_db_path, 'r')
 		rules = json.load(rules_file)
 		rules_file.close()
 		return rules;
 
 	def check_access(self, userName, rules):
-			self.analyze(userName, rules)
+		self.log('check access for user = {}'.format(userName))
+		self.analyze(userName, rules)
 
 if __name__ == '__main__':
 	try :
 		win32serviceutil.HandleCommandLine(AccessControlSvc)
 	except Exception as err:
 		print("error: {}".format(err))
-		
-
-def signal_handler(signal, frame):
-        print('You pressed Ctrl+C!')
-        sys.exit(0)
-
-signal.signal(signal.SIGINT, signal_handler)
-
-
-print('Press Ctrl+C')

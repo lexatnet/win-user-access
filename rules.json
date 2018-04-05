@@ -18,6 +18,8 @@
 			6,
 			7
 		],
+		"session-duration": "25m",
+		"pause-duration": "15m",
 		"access-duration":"1hr15m",
 		"access-time": [
 			{

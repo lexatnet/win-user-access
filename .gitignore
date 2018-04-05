@@ -1,2 +1,2 @@
-access.log
+*.log
 __pycache__
