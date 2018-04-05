@@ -20,7 +20,12 @@
 		],
 		"session-duration": "25m",
 		"pause-duration": "15m",
-		"access-duration":"1hr15m",
+		"access-duration": [
+			{
+				"limit": "1hr15m",
+				"period": "24h"
+			}
+		],
 		"access-time": [
 			{
 				"start": "18:00",
