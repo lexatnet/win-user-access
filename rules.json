@@ -23,7 +23,7 @@
 		"access-duration": [
 			{
 				"limit": "1hr15m",
-				"period": "24h"
+				"period": "24hr"
 			}
 		],
 		"access-time": [

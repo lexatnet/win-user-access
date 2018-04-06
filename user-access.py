@@ -1,6 +1,6 @@
 import os
 import subprocess
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import json
 import sqlite3
 import time
@@ -8,7 +8,6 @@ import argparse
 import signal
 import sys
 import re
-from datetime import timedelta
 import win32serviceutil
 import win32service
 import win32event
@@ -289,13 +288,17 @@ class AccessControlSvc (win32serviceutil.ServiceFramework):
 	def get_session_duration(self, user, rule):
 		access_log = self.get_access_log_for_rule(user, rule)
 		session_duration = timedelta()
-		prev_time = datetime.now()
+		prev_time = datetime.utcnow()
 		sleep = self.args.sleep
 		while len(access_log) > 0: 
 			rec = access_log.pop()
 			rec_time = datetime.strptime(rec[0], '%Y-%m-%d %H:%M:%S')
 			if (prev_time):
+				self.log('prev_time = {}'.format(prev_time))
+				self.log('rec_time = {}'.format(rec_time))
 				delta = prev_time - rec_time
+				self.log('delta = {}'.format(delta))
+				self.log('session_duration = {}'.format(session_duration))
 				if(delta < timedelta(seconds = sleep*2)):
 					session_duration += delta
 				else:
@@ -321,7 +324,7 @@ class AccessControlSvc (win32serviceutil.ServiceFramework):
 		conditions = []
 		conditions.append('(user = "{}")'.format(user))
 		if(period != None):
-			begin = datetime.now() + period
+			begin = datetime.now() - period
 			conditions.append('(dt >= "{}")'.format(begin))
 		for date_rule in date_rules:
 			if isinstance(date_rule, str):
@@ -414,20 +417,24 @@ class AccessControlSvc (win32serviceutil.ServiceFramework):
 					self.log('access duration rule access success')
 					return True
 			self.log('access duration rule access denied')
-			
-		return true
+			return False
+		return True
 		
 	def is_allowed_pause_duration(self, user, rule):
 		self.log('check pause duration')
+		sleep = self.args.sleep
 		pause_duration_rule_str = rule.get('pause-duration')
 		if (pause_duration_rule_str) :
 			pause_duration_rule = self.parse_time(pause_duration_rule_str)
 			pause_duration = self.get_pause_duration(user, rule)
-			self.log('pause duration = {}'.format(access_duration))
-			self.log('pause duration rule = {}'.format(pause_duration_rule))
-			if pause_duration > pause_duration_rule :
-				self.log('pause duration rule access success')
-				return True
+			if(pause_duration > timedelta(seconds = sleep*2)):				
+				self.log('pause duration = {}'.format(pause_duration))
+				self.log('pause duration rule = {}'.format(pause_duration_rule))
+				if pause_duration > pause_duration_rule :
+					self.log('pause duration rule access success')
+					return True
+			else:
+				self.log('pause not detected')
 		self.log('pause duration rule access denied')
 		return False
 
