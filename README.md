@@ -1,4 +1,5 @@
 # win-user-access
+    
     this is simple i use application to restrict access time users according rules
 
 
@@ -7,6 +8,7 @@
     - pywin32 - https://github.com/mhammond/pywin32 (here some dowloadeble installers https://github.com/mhammond/pywin32/releases)
 
 ## Installation:
+
     install dependencies
 
 
@@ -72,13 +74,17 @@
 
 
 ## Contents:
+    
     README.md - program description
     user-acces.py - main file of program
     rules.json.example - example of rules configuration
     /imades - directory contained images for README.md
 
+
 ## Details:
+
 ### user-access.py start service command line arguments:
+
     --user, -u, user to analyze access
     --registerUser, -ru, user to init registeredUsers
     --database, -db, database file name
@@ -88,4 +94,5 @@
     --debug, -d, run in debug mode
 
 ## Architecture:
-#TODO
+
+    #TODO
