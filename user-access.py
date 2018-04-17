@@ -320,31 +320,33 @@ class AccessControlSvc (win32serviceutil.ServiceFramework):
 		return pause_duration
 
 	def get_access_log_for_rule(self, user, rule, period = None):
-		date_rules = rule.get('access-date')
+		
 		conditions = []
 		conditions.append('(user = "{}")'.format(user))
 		if(period != None):
 			begin = datetime.now() - period
 			conditions.append('(dt >= "{}")'.format(begin))
-		for date_rule in date_rules:
-			if isinstance(date_rule, str):
-				date = datetime.strptime(date_rule, '%Y.%m.%d')
-				conditions.append('((dt >= "{}") and (dt <= "{}"))'.format(date, date));
-			if isinstance(date_rule, dict):
-				subconditions = []
-				
-				start_date_str = date_rule.get('start')
-				stop_date_str = date_rule.get('stop')
-				
-				if (start_date_str):
-					start_date = datetime.strptime(start_date_str, '%Y.%m.%d')
-					subconditions.append('(dt >= "{}")'.format(start_date))
+		date_rules = rule.get('access-date')
+		if(date_rules):
+			for date_rule in date_rules:
+				if isinstance(date_rule, str):
+					date = datetime.strptime(date_rule, '%Y.%m.%d')
+					conditions.append('((dt >= "{}") and (dt <= "{}"))'.format(date, date));
+				if isinstance(date_rule, dict):
+					subconditions = []
 					
-				if (stop_date_str):
-					stop_date = datetime.strptime(stop_date_str, '%Y.%m.%d')
-					subconditions.append('(dt <= "{}")'.format(stop_date))
+					start_date_str = date_rule.get('start')
+					stop_date_str = date_rule.get('stop')
 					
-				conditions.append('({})'.format(' and '.join(subconditions)))
+					if (start_date_str):
+						start_date = datetime.strptime(start_date_str, '%Y.%m.%d')
+						subconditions.append('(dt >= "{}")'.format(start_date))
+						
+					if (stop_date_str):
+						stop_date = datetime.strptime(stop_date_str, '%Y.%m.%d')
+						subconditions.append('(dt <= "{}")'.format(stop_date))
+						
+					conditions.append('({})'.format(' and '.join(subconditions)))
 
 		time_rules = rule.get('access-time')
 		if(time_rules):
@@ -398,8 +400,10 @@ class AccessControlSvc (win32serviceutil.ServiceFramework):
 			if session_duration < session_duration_rule :
 				self.log('session duration rule access success')
 				return True
-		self.log('session duration rule access denied')
-		return False
+			self.log('session duration rule access denied')
+			return False
+		self.log('session duration rule access skiped')
+		return True
 	
 	def is_allowed_access_duration(self, user, rule):
 		self.log('check access duration')
@@ -418,6 +422,7 @@ class AccessControlSvc (win32serviceutil.ServiceFramework):
 					return True
 			self.log('access duration rule access denied')
 			return False
+		self.log('access duration rule access skiped')
 		return True
 		
 	def is_allowed_pause_duration(self, user, rule):
@@ -435,8 +440,10 @@ class AccessControlSvc (win32serviceutil.ServiceFramework):
 					return True
 			else:
 				self.log('pause not detected')
-		self.log('pause duration rule access denied')
-		return False
+			self.log('pause duration rule access denied')
+			return False
+		self.log('pause duration rule access skiped')
+		return True
 
 	def is_allowed_date(self, rule):
 		self.log('check access date')
