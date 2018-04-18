@@ -93,6 +93,125 @@ C:/AccessControl/user-access.py start --user test --registerUser test
 - --sleep, -s sleep seconds between access checks
 - --debug, -d, run in debug mode
 
+### rules.json configuration time params
+
+
+configuration this is array of rules: []
+(if any of rules allow access for user then access for user is granted )
+Example:
+```
+  [
+    <rule>,
+    ...
+    <ruleN>
+  ]
+```
+
+where each rule this is object: {}
+
+with set optional descriptions
+(if any aspect doesn't allow access then rule not grant access for user)
+example:
+```
+ {
+   <description>,
+   ...
+   <descriptionN>,
+ }
+```
+
+each description this is consist form name of aspect and restrictions for aspect
+
+aspects:
+
+"users" - list allowed users. if user name in list then access is granted for user otherwise access denied
+example:
+```
+"users": ["user1", "user2"]
+```
+
+"access-date" - list of allowed dates or dates intervals. if current date belong to dates interval described in restrictions or it one of specified dates then access is granted for user otherwise access denied
+example:
+```
+"access-date":[
+  {
+    "start": "2018.02.18",
+    "stop": "2018.03.29"
+  },
+  "2018.04.02"
+]
+```
+
+"access-day" - list allowed days of week on intervals days of week
+1 - Monday
+...
+7 - Sunday
+if current day belong to one of day of week intervals or specified day then user access is granted otherwise access denied
+
+example:
+```
+"access-day":[
+  {
+    "start": 1,
+    "stop": 4
+  },
+  6
+],
+```
+
+"session-duration" - allowed session duration in format: "XhrYmZs"
+hr - hours
+m - minutes
+s - seconds
+if current session duration less then specified time interval then access for user is granted otherwise access denied
+example:
+```
+"session-duration": "1hr"
+```
+
+"pause-duration": minimal allowed time between sessions in format: "XhrYmZs"
+hr - hours
+m - minutes
+s - seconds
+if previous sesson ended more then specified time interval ago then user access is granted otherwise access denied
+example:
+```
+"pause-duration": "15m"
+```
+
+"access-duration" - limit access time
+hr - hours
+m - minutes
+s - seconds
+example:
+```
+"access-duration": [
+  {
+    "limit": "1hr15m",
+    "period": "24hr"
+  }
+]
+```
+
+"access-time" - list access time restrictions
+example:
+```
+"access-time": [
+  {
+    "start": "18:00",
+    "stop": "21:00"
+  },
+  {
+    "start": "0:15",
+    "stop": "4:00"
+  }
+]
+```
+
+
+
+
 ## Architecture:
 
-#TODO
+# TODO
+* rewrite read/write db in thread
