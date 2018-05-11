@@ -20,25 +20,24 @@ import logging
 
 file_path = os.path.realpath(__file__)
 dir_path = os.path.dirname(file_path)
-		
+
 logging.basicConfig(
 	filename = os.path.join(dir_path, 'service.log'),
-	level = logging.DEBUG, 
+	level = logging.DEBUG,
 	format = '[access-control-service] %(levelname)-7.7s %(message)s'
 )
-
 
 class AccessControlSvc (win32serviceutil.ServiceFramework):
 	_svc_name_ = "AccessControlService"
 	_svc_display_name_ = "Access Control Service"
-	
+
 	def __init__(self, args):
 		try:
 			self.parseArgs(args)
 			self.log('start service initializing')
 			self.initRegisteredUsers()
 			self.regex = re.compile(r'((?P<hours>\d+?)hr)?((?P<minutes>\d+?)m)?((?P<seconds>\d+?)s)?')
-			
+
 			self.initDB()
 			self.log('service init args = {}'.format(args))
 
@@ -65,8 +64,10 @@ class AccessControlSvc (win32serviceutil.ServiceFramework):
 		self.args = parser.parse_args(argsList)
 		self.argsParsed = True
 		self.log('arguments = {}'.format(vars(self.args)))
-		
-	
+
+	def get_utc_delta(self):
+		return (datetime.now() - datetime.utcnow())
+
 	def parse_time(self, time_str):
 		parts = self.regex.match(time_str)
 		if not parts:
@@ -79,7 +80,7 @@ class AccessControlSvc (win32serviceutil.ServiceFramework):
 				time_params[name] = int(param)
 		return timedelta(**time_params)
 
-	
+
 	def log(self, message, status='info'):
 		if hasattr(self, 'argsParsed') and self.argsParsed and hasattr(self, 'args') and self.args.debug :
 			if(status == 'info'):
@@ -104,7 +105,7 @@ class AccessControlSvc (win32serviceutil.ServiceFramework):
 		self.log('shuting down')
 		subprocess.run(['shutdown', '-f', '-s', '-t', self.args.shutdownDelay])
 		#self.SvcStop()
-		
+
 	def wait(self):
 		sleep = self.args.sleep
 		self.log('sleep {} seconds'.format(sleep))
@@ -112,36 +113,48 @@ class AccessControlSvc (win32serviceutil.ServiceFramework):
 			if (self.stop_requested):
 				break
 			time.sleep(1);
-	
+
 	def getAccesLogPath(self):
 		return os.path.join(dir_path, self.args.database)
-	
-	
-	def getDBConnection(self):
+
+
+        def getDBConnection(self):
 		if not hasattr(self, 'argsParsed'): raise Exception('args not parsed')
 		access_log_path = self.getAccesLogPath()
 		conn = sqlite3.connect(access_log_path)
 		return conn
-	
+
+	def day_of_week_to_06(self, day):
+		day_map = {
+			1: 1,
+			2: 2,
+			3: 3,
+			4: 4,
+			5: 5,
+			6: 6,
+			7: 0
+		}
+		return day_map[day]
+
 	def initDB(self):
 		conn = self.getDBConnection()
 		cursor = conn.cursor()
 		self.log('initialize DB structure')
 		cursor.execute('create table if not exists AccessLog(dt datetime default current_timestamp, user text, data text)')
 		cursor.execute('create table if not exists Log(dt datetime default current_timestamp, status text, data text)')
-	
+
 	def serviceCtrl(self, control, controlType, controlData):
 		try:
 			self.log('serviceCtrl control = {} , controlType = {}, controlData = {}'.format(control, controlType, controlData))
-			
-			if(control == win32service.SERVICE_CONTROL_STOP): 
+
+			if(control == win32service.SERVICE_CONTROL_STOP):
 				self.log('serviceCtrl control = {}'.format('SERVICE_CONTROL_STOP'))
 				self.SvcStop()
 			elif(control == win32service.SERVICE_CONTROL_SHUTDOWN):
 				self.log('serviceCtrl control = {}'.format('SERVICE_CONTROL_SHUTDOWN'))
 				self.SvcStop()
 			elif(control == win32service.SERVICE_CONTROL_SESSIONCHANGE):
-				userInfo = self.GetUserInfo(controlData[0])	
+				userInfo = self.GetUserInfo(controlData[0])
 				userName = userInfo['UserName']
 				self.log('serviceCtrl control = {}, userInfo = {}'.format('SERVICE_CONTROL_SESSIONCHANGE', userInfo))
 				types = {
@@ -165,7 +178,7 @@ class AccessControlSvc (win32serviceutil.ServiceFramework):
 					self.unregisterUser(userName)
 				elif(controlType == types['WTS_SESSION_UNLOCK']):
 					self.registerUser(userName)
-					
+
 			elif(control == win32service.SERVICE_CONTROL_PRESHUTDOWN):
 				self.log('serviceCtrl control = {}'.format('SERVICE_CONTROL_PRESHUTDOWN'))
 			elif(control == win32service.SERVICE_CONTROL_CONTINUE):
@@ -200,11 +213,11 @@ class AccessControlSvc (win32serviceutil.ServiceFramework):
 		self.registeredUsers = []
 		for userName in self.args.registeredUsers:
 			self.registerUser(userName)
-	
+
 	def registerUser(self, userName):
 			self.log('start checking for user = {}'.format(userName))
 			self.registeredUsers.append(userName)
-	
+
 	def unregisterUser(self, userName):
 		if(userName in self.registeredUsers):
 			self.log('stop checking for user = {}'.format(userName))
@@ -224,7 +237,7 @@ class AccessControlSvc (win32serviceutil.ServiceFramework):
 		)
 		self.main()
 		self.ReportServiceStatus(win32service.SERVICE_STOPPED)
-			
+
 	def GetUserInfo(self, sess_id):
 		sessions = win32security.LsaEnumerateLogonSessions()[:-5]
 		for sn in sessions:
@@ -240,7 +253,7 @@ class AccessControlSvc (win32serviceutil.ServiceFramework):
 			return rc
 		except Exception as err:
 			self.log(err, 'exception')
-	
+
 	def main(self):
 		try:
 			self.log(' ** Access Control Service ** ')
@@ -252,8 +265,8 @@ class AccessControlSvc (win32serviceutil.ServiceFramework):
 				rules = self.get_access_rules()
 				self.log('process users access')
 				for userName in self.args.users:
-					self.log_access(userName)
 					if(userName in self.registeredUsers):
+						self.log_access(userName)
 						self.check_access(userName, rules)
 					else:
 						self.log('skip user = {} checking'.format(userName))
@@ -263,7 +276,7 @@ class AccessControlSvc (win32serviceutil.ServiceFramework):
 		except Exception as err:
 			self.log(err, 'exception')
 		return
-		
+
 	def log_access(self, userName):
 		conn = self.getDBConnection()
 		cursor = conn.cursor()
@@ -275,7 +288,7 @@ class AccessControlSvc (win32serviceutil.ServiceFramework):
 		access_time = timedelta()
 		prev_time = False
 		sleep = self.args.sleep
-		while len(access_log) > 0: 
+		while len(access_log) > 0:
 			rec = access_log.pop()
 			rec_time = datetime.strptime(rec[0], '%Y-%m-%d %H:%M:%S')
 			if (prev_time):
@@ -284,13 +297,13 @@ class AccessControlSvc (win32serviceutil.ServiceFramework):
 					access_time += delta
 			prev_time = rec_time
 		return access_time
-	
+
 	def get_session_duration(self, user, rule):
 		access_log = self.get_access_log_for_rule(user, rule)
 		session_duration = timedelta()
 		prev_time = datetime.utcnow()
 		sleep = self.args.sleep
-		while len(access_log) > 0: 
+		while len(access_log) > 0:
 			rec = access_log.pop()
 			rec_time = datetime.strptime(rec[0], '%Y-%m-%d %H:%M:%S')
 			if (prev_time):
@@ -305,13 +318,13 @@ class AccessControlSvc (win32serviceutil.ServiceFramework):
 					break
 			prev_time = rec_time
 		return session_duration
-	
+
 	def get_pause_duration(self, user, rule):
 		access_log = self.get_access_log_for_rule(user, rule)
 		pause_duration = timedelta()
 		current_time = datetime.now()
 		sleep = self.args.sleep
-		if len(access_log) > 0: 
+		if len(access_log) > 0:
 			rec = access_log.pop()
 			rec_time = datetime.strptime(rec[0], '%Y-%m-%d %H:%M:%S')
 			delta = current_time - rec_time
@@ -320,72 +333,77 @@ class AccessControlSvc (win32serviceutil.ServiceFramework):
 		return pause_duration
 
 	def get_access_log_for_rule(self, user, rule, period = None):
-		
-		conditions = []
-		conditions.append('(user = "{}")'.format(user))
-		if(period != None):
-			begin = datetime.now() - period
-			conditions.append('(dt >= "{}")'.format(begin))
 		date_rules = rule.get('access-date')
+		conditions = []
+		if(period != None):
+			begin = datetime.utcnow() - period
+			conditions.append('(strftime("%s", dt) >= strftime("%s","{}"))'.format(begin))
 		if(date_rules):
+			date_rules_conditions = []
 			for date_rule in date_rules:
 				if isinstance(date_rule, str):
 					date = datetime.strptime(date_rule, '%Y.%m.%d')
-					conditions.append('((dt >= "{}") and (dt <= "{}"))'.format(date, date));
+					date_rules_conditions.append('((strftime("%s", dt, "localtime") >= strftime("%s","{}")) and (strftime("%s", dt, "localtime") <= strftime("%s","{}")))'.format(date, date + timedelta(days=1)));
 				if isinstance(date_rule, dict):
 					subconditions = []
-					
+
 					start_date_str = date_rule.get('start')
 					stop_date_str = date_rule.get('stop')
-					
+
 					if (start_date_str):
 						start_date = datetime.strptime(start_date_str, '%Y.%m.%d')
-						subconditions.append('(dt >= "{}")'.format(start_date))
-						
+						subconditions.append('(strftime("%s", dt, "localtime") >= strftime("%s","{}"))'.format(start_date))
+
 					if (stop_date_str):
 						stop_date = datetime.strptime(stop_date_str, '%Y.%m.%d')
-						subconditions.append('(dt <= "{}")'.format(stop_date))
-						
-					conditions.append('({})'.format(' and '.join(subconditions)))
+						subconditions.append('(strftime("%s", dt, "localtime") <= strftime("%s","{}"))'.format(stop_date))
+
+					date_rules_conditions.append('({})'.format(' and '.join(subconditions)))
+			conditions.append('({})'.format(' or '.join(date_rules_conditions)))
 
 		time_rules = rule.get('access-time')
 		if(time_rules):
+			time_rules_conditions = []
 			for time_rule in time_rules:
 				if isinstance(time_rule, dict):
 					start_time_str = time_rule.get('start')
 					stop_time_str = time_rule.get('stop')
 					subconditions = []
-						
+
 					if (start_time_str):
-						start_time = datetime.strptime(start_time_str, '%H:%M').strftime('%H:%M')
-						subconditions.append('(strftime("%H:%M", dt) >= "{}")'.format(start_time))
-					
+						start_time = datetime.strptime(start_time_str, '%H:%M')
+						subconditions.append('(strftime("%H:%M", dt, "localtime") >= "{}")'.format(start_time.strftime('%H:%M')))
+
 					if (stop_time_str):
-						stop_time = datetime.strptime(stop_time_str, '%H:%M').strftime('%H:%M')
-						subconditions.append('(strftime("%H:%M", dt) <= "{}")'.format(stop_time))
-					
-					conditions.append('({})'.format(' and '.join(subconditions)))
-		
+						stop_time = datetime.strptime(stop_time_str, '%H:%M')
+						subconditions.append('(strftime("%H:%M", dt, "localtime") <= "{}")'.format(stop_time.strftime('%H:%M')))
+
+					time_rules_conditions.append('({})'.format(' and '.join(subconditions)))
+			conditions.append('({})'.format(' or '.join(time_rules_conditions)))
+
 		day_rules = rule.get('access-day')
 		if(day_rules):
+			day_rules_conditions = []
 			for day_rule in day_rules:
 				if isinstance(day_rule, int):
-					conditions.append('( strftime("%w", dt)) = {}'.format(day_rule))
+					day_rules_conditions.append('( strftime("%w", dt, "localtime")) = "{}"'.format(self.day_of_week_to_06(day_rule)))
 				if isinstance(day_rule, dict):
 					start_day = day_rule.get('start')
 					stop_day = day_rule.get('stop')
 					subconditions = []
 					if (start_day):
-						subconditions.append('( strftime("%w", dt)) >= {}'.format(start_day))
-						
+						subconditions.append('( strftime("%w", dt, "localtime") >= "{}")'.format(self.day_of_week_to_06(start_day)))
+
 					if (stop_day):
-						subconditions.append('( strftime("%w", dt)) <= {}'.format(stop_day))
-				
-					conditions.append('({})'.format(' and '.join(subconditions)))
-		
-		query = 'select * from AccessLog where (user = "{}") and ({}) order by dt asc'.format(user, ' or '.join(conditions))
+						subconditions.append('( strftime("%w", dt, "localtime") <= "{}")'.format(self.day_of_week_to_06(stop_day)))
+
+					day_rules_conditions.append('({})'.format(' and '.join(subconditions)))
+			conditions.append('({})'.format(' or '.join(day_rules_conditions)))
+
+		query = 'select * from AccessLog where (user = "{}") and ({}) order by dt asc'.format(user, ' and '.join(conditions))
 		conn = self.getDBConnection()
 		cursor = conn.cursor()
+		self.log('get access log for rule query = {}'.format(query))
 		cursor.execute(query)
 		return cursor.fetchall()
 
@@ -400,16 +418,16 @@ class AccessControlSvc (win32serviceutil.ServiceFramework):
 			if session_duration < session_duration_rule :
 				self.log('session duration rule access success')
 				return True
-			self.log('session duration rule access denied')
 			return False
+			self.log('session duration rule access denied')
 		self.log('session duration rule access skiped')
 		return True
-	
+
 	def is_allowed_access_duration(self, user, rule):
 		self.log('check access duration')
 		access_duration_rules = rule.get('access-duration')
 		if(access_duration_rules):
-			for access_duration_rule in access_duration_rules:					
+			for access_duration_rule in access_duration_rules:
 				access_duration_limit_str = access_duration_rule.get('limit')
 				access_duration_period_str = access_duration_rule.get('period')
 				access_duration_limit = self.parse_time(access_duration_limit_str)
@@ -424,7 +442,7 @@ class AccessControlSvc (win32serviceutil.ServiceFramework):
 			return False
 		self.log('access duration rule access skiped')
 		return True
-		
+
 	def is_allowed_pause_duration(self, user, rule):
 		self.log('check pause duration')
 		sleep = self.args.sleep
@@ -432,7 +450,7 @@ class AccessControlSvc (win32serviceutil.ServiceFramework):
 		if (pause_duration_rule_str) :
 			pause_duration_rule = self.parse_time(pause_duration_rule_str)
 			pause_duration = self.get_pause_duration(user, rule)
-			if(pause_duration > timedelta(seconds = sleep*2)):				
+			if(pause_duration > timedelta(seconds = sleep*2)):
 				self.log('pause duration = {}'.format(pause_duration))
 				self.log('pause duration rule = {}'.format(pause_duration_rule))
 				if pause_duration > pause_duration_rule :
@@ -474,7 +492,7 @@ class AccessControlSvc (win32serviceutil.ServiceFramework):
 						if(current_date >= start_date):
 							self.log('date rule access success')
 							return True
-						
+
 					elif (not start_date_str and stop_date_str):
 						stop_date = datetime.strptime(stop_date_str, '%Y.%m.%d')
 						self.log('stop date {}'.format(stop_date))
@@ -492,9 +510,9 @@ class AccessControlSvc (win32serviceutil.ServiceFramework):
 			self.log('check rule = {}'.format(rule))
 			if (
 				self.is_allowed_user(userName,rule)
-				and self.is_allowed_date(rule) 
-				and self.is_allowed_day(rule) 
-				and self.is_allowed_time(rule) 
+				and self.is_allowed_date(rule)
+				and self.is_allowed_day(rule)
+				and self.is_allowed_time(rule)
 				and self.is_allowed_access_duration(userName, rule)
 				and (
 					self.is_allowed_session_duration(userName, rule)
@@ -517,7 +535,7 @@ class AccessControlSvc (win32serviceutil.ServiceFramework):
 			return True
 		self.log('user rule access denied')
 		return False
-			
+
 	def is_allowed_day(self, rule):
 		self.log('check access day')
 		current_day = datetime.isoweekday(datetime.now())
@@ -542,7 +560,7 @@ class AccessControlSvc (win32serviceutil.ServiceFramework):
 					elif (start_day and not stop_day and (current_day >= start_day)):
 						self.log('day rule access success')
 						return True
-						
+
 					elif (not start_day and stop_day and(current_day <= stop_day)):
 						self.log('day rule access success')
 						return True
@@ -570,14 +588,14 @@ class AccessControlSvc (win32serviceutil.ServiceFramework):
 						if (current_time <= stop_time) and (current_time >= start_time):
 							self.log('time rule access success')
 							return True
-						
+
 					elif (start_time_str and not stop_time_str):
 						start_time = datetime.strptime(start_time_str, '%H:%M').time()
 						self.log('start_time = {}'.format(start_time))
 						if(current_time >= start_time):
 							self.log('time rule access success')
 							return True
-						
+
 					elif (not start_time_str and stop_time_str):
 						stop_time = datetime.strptime(stop_time_str, '%H:%M').time()
 						if (current_time <= stop_time):
